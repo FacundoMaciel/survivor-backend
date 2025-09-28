@@ -22,7 +22,6 @@ services:
       - "27017:27017"
     volumes:
       - .:/app
-      - /app/node_modules
       - mongo_data:/data/db
 
 volumes:

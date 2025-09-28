@@ -1,22 +1,37 @@
 // models/PredictionSurvivor.ts
 import mongoose, { Document, Schema } from 'mongoose';
 
-export interface IPredictionSurvivor extends Document {
-  userId: string;
-  survivorId: string;
-  prediction?: string | null;
-  matchId: { type: String, required: true };
-  createdAt: Date;
-  result?: 'success' | 'fail' | null;
+interface IPrediction {
+  matchId: string;
+  teamId: string;
+  result?: 'success' | 'fail' | 'pending' | null;
 }
 
-const PredictionSurvivorSchema = new Schema({
-  userId: { type: String, required: true },
-  survivorId: { type: Schema.Types.ObjectId, ref: 'Survivor', required: true },
-  prediction: { type: String, default: null },
-  createdAt: { type: Date, default: Date.now },
+export interface IPredictionSurvivor extends Document {
+  userId: string;
+  survivorId: mongoose.Types.ObjectId | string;
+  predictions: IPrediction[];
+  createdAt: Date;
+}
+
+const PredictionSchema = new Schema<IPrediction>({
   matchId: { type: String, required: true },
-  result: { type: String, enum: ['success', 'fail'], default: null }
+  teamId: { type: String, required: true },
+  result: {
+    type: String,
+    enum: ['success', 'fail', 'pending'],
+    default: 'pending',
+  },
 });
 
-export default mongoose.model<IPredictionSurvivor>('PredictionSurvivor', PredictionSurvivorSchema);
+const PredictionSurvivorSchema = new Schema<IPredictionSurvivor>({
+  userId: { type: String, required: true },
+  survivorId: { type: Schema.Types.ObjectId, ref: 'Survivor', required: true },
+  predictions: { type: [PredictionSchema], default: [] },
+  createdAt: { type: Date, default: Date.now },
+});
+
+export default mongoose.model<IPredictionSurvivor>(
+  'PredictionSurvivor',
+  PredictionSurvivorSchema
+);
