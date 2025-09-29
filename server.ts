@@ -29,3 +29,5 @@ app.use('/api/survivor', survivorRoutes);
 
 const PORT = process.env.PORT || 4300;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+export default app

@@ -4,12 +4,14 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+# Solo dependencias necesarias
+RUN npm ci --only=production
 
 COPY . .
 
+# Compilamos TS a JS
 RUN npm run build
 
 EXPOSE 4300
 
-CMD ["npm", "run", "dev:watch"]
+CMD ["node", "dist/server.js"]

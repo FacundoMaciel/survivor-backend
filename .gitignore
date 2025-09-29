@@ -1,0 +1,23 @@
+# dependencias
+node_modules/
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# sistema operativo
+.DS_Store
+Thumbs.db
+
+# entorno
+.env
+.env.local
+.env.*.local
+.env.docker
+
+# compilados / builds
+dist/
+build/
+coverage/
+
