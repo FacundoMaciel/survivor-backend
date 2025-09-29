@@ -3,8 +3,8 @@ import Survivor from '../models/Survivor';
 import GambleSurvivor from '../models/GambleSurvivor';
 import PredictionSurvivor from '../models/PredictionSurvivor';
 
-
-// Extend Express Request interface to include 'user'
+// 🔹 Extendemos la interfaz de Express Request para incluir "user"
+//    Esto permite usar req.user en los controladores.
 declare global {
   namespace Express {
     interface User {
@@ -18,7 +18,10 @@ declare global {
 
 const router = express.Router();
 
-// Get all survivors
+/* ===============================
+   GET /api/survivor/
+   Obtiene todos los survivors disponibles
+   =============================== */
 router.get('/', async (req: Request, res: Response) => {
   try {
     const survivors = await Survivor.find();
@@ -28,27 +31,62 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// Get user status in a survivor
+/* ===============================
+   GET /api/survivor/status/:userId/:survivorId
+   Devuelve el estado de un usuario dentro de un survivor
+   - vidas restantes
+   - eliminado o no
+   - posición en el ranking
+   - total de participantes y activos
+   =============================== */
 router.get('/status/:userId/:survivorId', async (req: Request, res: Response) => {
   const { userId, survivorId } = req.params;
 
   try {
-    const gamble = await GambleSurvivor.findOne({ userId, survivorId });
-    if (!gamble) return res.status(404).json({ error: 'User not joined in survivor' });
+    const survivor = await Survivor.findById(survivorId);
+    if (!survivor) {
+      return res.status(404).json({ error: 'Survivor not found' });
+    }
 
-    res.status(200).json({
-      lives: gamble.lives,
-      eliminated: gamble.eliminated,
-      joinedAt: gamble.joinedAt
+    // Buscar todos los jugadores del survivor
+    const gambles = await GambleSurvivor.find({ survivorId }).sort({ lives: -1 });
+
+    // Buscar gamble del usuario
+    const userGamble = gambles.find(g => g.userId.toString() === userId);
+
+    // Contar activos
+    const activeCount = gambles.filter(g => !g.eliminated && g.lives > 0).length;
+
+    // Posición del usuario
+    let position: number | null = null;
+    if (userGamble) {
+      const sorted = [...gambles].sort((a, b) => b.lives - a.lives);
+      position = sorted.findIndex(g => g.userId.toString() === userId) + 1;
+    }
+
+    res.json({
+      joined: !!userGamble,
+      lives: userGamble ? userGamble.lives : survivor.lives,
+      eliminated: userGamble ? userGamble.eliminated : false,
+      position,
+      total: gambles.length,
+      active: activeCount,
+      simulationDone: survivor.finished ?? false,
     });
-
   } catch (err) {
     console.error('Status error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// /api/survivor/ranking
+
+
+/* ===============================
+   GET /api/survivor/ranking/:survivorId
+   Devuelve el ranking de todos los jugadores en un survivor
+   - score = cantidad de aciertos (predicciones con result=success)
+   - ordenado por score y luego por vidas
+   =============================== */
 router.get("/ranking/:survivorId", async (req, res) => {
   const { survivorId } = req.params;
 
@@ -56,7 +94,6 @@ router.get("/ranking/:survivorId", async (req, res) => {
     const predictions = await PredictionSurvivor.find({ survivorId });
     const gambles = await GambleSurvivor.find({ survivorId });
 
-    // Mapear ranking
     const ranking = predictions.map((p) => {
       const score = p.predictions.filter((pr) => pr.result === "success").length;
       const gamble = gambles.find((g) => g.userId === p.userId);
@@ -69,7 +106,6 @@ router.get("/ranking/:survivorId", async (req, res) => {
       };
     });
 
-    // Ordenar por score (desc), y luego por vidas
     ranking.sort((a, b) => b.score - a.score || b.lives - a.lives);
 
     res.json({ ranking });
@@ -81,9 +117,10 @@ router.get("/ranking/:survivorId", async (req, res) => {
   }
 });
 
-
-
-// Get user picks in a survivor history
+/* ===============================
+   GET /api/survivor/picks/:userId/:survivorId
+   Devuelve el historial de predicciones de un usuario
+   =============================== */
 router.get('/picks/:userId/:survivorId', async (req: Request, res: Response) => {
   const { userId, survivorId } = req.params;
 
@@ -107,50 +144,108 @@ router.get('/picks/:userId/:survivorId', async (req: Request, res: Response) => 
   }
 });
 
-// Join a survivor
-router.post('/join/:id', async (req: Request, res: Response) => {
+router.get('/simulation/:survivorId', async (req: Request, res: Response) => {
+  const { survivorId } = req.params;
+  try {
+    const survivor = await Survivor.findById(survivorId);
+    if (!survivor) return res.status(404).json({ error: 'Survivor not found' });
+    if (!survivor.finished) return res.status(400).json({ error: 'Simulation not completed yet' });
+
+    return res.status(200).json({ results: survivor.survivorResults || {} });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get("/results/:userId/:survivorId", async (req: Request, res: Response) => {
+  const { userId, survivorId } = req.params;
+  try {
+    const survivor = await Survivor.findById(survivorId);
+    if (!survivor) return res.status(404).json({ error: "Survivor not found" });
+
+    const prediction = await PredictionSurvivor.findOne({ userId, survivorId });
+    const gamble = await GambleSurvivor.findOne({ userId, survivorId });
+
+    if (!prediction || !gamble) {
+      return res.json({ results: [], lives: 0, simulationDone: survivor.finished });
+    }
+
+    const results: any[] = [];
+    survivor.competition.forEach((jornada) => {
+      jornada.matches.forEach((m) => {
+        const pick = prediction.predictions.find((p) => p.matchId === m.matchId);
+        const matchResult = survivor.survivorResults[m.matchId];
+
+        results.push({
+          matchId: m.matchId,
+          home: m.home,
+          visitor: m.visitor,
+          userTeam: pick ? pick.teamId : null,
+          winner: matchResult ? matchResult.winner : null,
+          result: pick ? pick.result : null,
+        });
+      });
+    });
+
+    res.json({
+      results,
+      lives: gamble.lives,
+      simulationDone: survivor.finished,
+    });
+  } catch (err) {
+    console.error("Results error:", err);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+
+/* ===============================
+   POST /api/survivor/join/:id
+   Un usuario se une a un survivor
+   - crea GambleSurvivor con sus vidas
+   - crea PredictionSurvivor vacío
+   =============================== */
+router.post("/join/:id", async (req: Request, res: Response) => {
   const survivorId = req.params.id;
   const { userId } = req.body;
 
   try {
     const survivor = await Survivor.findById(survivorId);
-    if (!survivor) return res.status(404).json({ error: 'Survivor not found' });
+    if (!survivor) return res.status(404).json({ error: "Survivor not found" });
 
-    // Verificar si ya está unido
     const alreadyJoined = await GambleSurvivor.exists({ userId, survivorId });
     if (alreadyJoined) {
-      return res.status(400).json({ error: 'User already joined' });
+      return res.status(400).json({ error: "User already joined" });
     }
 
-    // Crear el estado de juego con 3 vidas
     await GambleSurvivor.create({
       userId,
       survivorId,
-      lives: survivor.competition.length, // arranca acá con las vidas
+      lives: survivor.lives,
       eliminated: false,
       joinedAt: new Date(),
     });
 
-    // Crear la "bandeja" de predicciones vacía
     await PredictionSurvivor.create({
       userId,
       survivorId,
       predictions: [],
     });
 
-    console.log(`[JOIN] user=${userId} survivor=${survivorId} at=${new Date().toISOString()}`);
-    res.status(201).json({ message: 'Successfully joined survivor' });
+    console.log(`[JOIN] user=${userId} survivor=${survivorId}`);
+    res.status(201).json({ message: "Successfully joined survivor" });
   } catch (err) {
-    console.error('Join error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Join error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-
-/**
- * POST /predict/:id
- * Guardar predicciones → agrega { matchId, teamId } al predictions_survivor
- */
+/* ===============================
+   POST /api/survivor/predict/:id
+   Guardar predicciones de un usuario
+   - agrega o actualiza teamId en cada matchId
+   =============================== */
 router.post('/predict/:id', async (req: Request, res: Response) => {
   const survivorId = req.params.id;
   const { userId, predictions } = req.body;
@@ -175,8 +270,7 @@ router.post('/predict/:id', async (req: Request, res: Response) => {
     });
 
     await predictionDoc.save();
-
-    console.log(`[PREDICT] user=${userId} survivor=${survivorId} predictions=${predictions.length}`);
+    console.log(`[PREDICT] user=${userId} survivor=${survivorId}`);
     res.status(200).json({ message: 'Predictions saved' });
   } catch (err) {
     console.error('Predict error:', err);
@@ -184,35 +278,42 @@ router.post('/predict/:id', async (req: Request, res: Response) => {
   }
 });
 
-// Choose team
-router.post('/pick', /* validateUser, */ async (req: Request, res: Response) => {
+/* ===============================
+   POST /api/survivor/pick
+   Seleccionar un equipo para un partido
+   - valida survivor, match y team
+   - guarda en PredictionSurvivor
+   =============================== */
+router.post('/pick', async (req: Request, res: Response) => {
   const userId = req.user!.id;
   const { survivorId, matchId, teamId } = req.body;
+
   try {
-    // Validar Survivor
     const survivor = await Survivor.findById(survivorId);
     if (!survivor) return res.status(404).json({ error: 'Survivor not found' });
 
-    // Validar que la fecha actual sea antes del startDate
+    // No permitir picks después de la fecha de inicio
     if (new Date() > new Date(survivor.startDate)) {
       return res.status(400).json({ error: 'Cannot pick after the match has started' });
     }
 
-    // Buscar el match dentro del Survivor
-    const match = survivor.competition.find((m: any) => m.matchId === matchId);
+    const round = survivor.competition.find((r: any) =>
+      r.matches.some((m: any) => m.matchId === matchId)
+    );
+    if (!round) return res.status(404).json({ error: 'Match not found in survivor' });
+
+    const match = round.matches.find((m: any) => m.matchId === matchId);
     if (!match) return res.status(404).json({ error: 'Match not found in survivor' });
 
-    // Validar que el teamId sea válido
+    // Validar que el equipo elegido pertenece al partido
     const validTeamIds = [match.home._id.toString(), match.visitor._id.toString()];
     if (!validTeamIds.includes(teamId)) {
       return res.status(400).json({ error: 'Invalid team selection for this match' });
     }
 
-    // Validar que el usuario esté unido
     const joined = await GambleSurvivor.exists({ userId, survivorId });
     if (!joined) return res.status(403).json({ error: 'User has not joined this survivor' });
 
-    // Actualizar predicción
     const prediction = await PredictionSurvivor.findOneAndUpdate(
       { userId, survivorId },
       { prediction: teamId },
@@ -231,100 +332,98 @@ router.post('/pick', /* validateUser, */ async (req: Request, res: Response) => 
   }
 });
 
-// Games simulator endpoint
-// survivorRoutes.ts
-
-router.post('/simulate/:survivorId', async (req: Request, res: Response) => {
-  const { survivorId } = req.params;
+/* ===============================
+   POST /api/survivor/simulate/:id
+   Simula resultados de los partidos
+   - genera resultados aleatorios (success/fail/draw)
+   - asigna ganador y guarda en PredictionSurvivor
+   - actualiza vidas en GambleSurvivor
+   - devuelve resultados de cada partido
+   =============================== */
+router.post("/simulate/:id", async (req: Request, res: Response) => {
+  const survivorId = req.params.id;
 
   try {
     const survivor = await Survivor.findById(survivorId);
-    if (!survivor) {
-      return res.status(404).json({ error: 'Survivor not found' });
+    if (!survivor) return res.status(404).json({ error: "Survivor not found" });
+
+    if (survivor.finished) {
+      return res.status(400).json({ error: "Survivor already simulated" });
     }
 
-    const predictions = await PredictionSurvivor.find({ survivorId });
-    if (!predictions.length) {
-      return res.status(404).json({ error: 'No predictions found for this survivor' });
+    // 🔹 Bloqueo si no hay predicciones
+    const predictionsCount = await PredictionSurvivor.countDocuments({ survivorId });
+    if (predictionsCount === 0) {
+      return res.status(400).json({ error: "No hay predicciones para simular" });
     }
 
-    const outcomes = ['success', 'fail', 'draw'] as const;
-    const resultsByMatch: Record<string, any> = {};
+    // 🔹 resultados random por cada partido
+    const results: Record<string, any> = {};
 
-    // obtener todos los matchIds únicos
-    const allMatchIds = new Set(
-      predictions.flatMap(record => record.predictions.map(p => p.matchId))
-    );
+    survivor.competition.forEach((jornada) => {
+      jornada.matches.forEach((m) => {
+        const random = Math.random();
 
-    for (const matchId of allMatchIds) {
-      const randomResult = outcomes[Math.floor(Math.random() * outcomes.length)];
-
-      // buscar los datos del match en survivor.competition
-      const matchData = survivor.competition.find(m => m.matchId === matchId);
-
-      if (!matchData) continue;
-
-      // por simplicidad: elegimos ganador al azar entre home y visitor
-      const winner =
-        randomResult === 'draw'
-          ? null
-          : Math.random() < 0.5
-            ? matchData.home
-            : matchData.visitor;
-
-      resultsByMatch[matchId] = {
-        result: randomResult,
-        winner: winner ? { name: winner.name, flag: winner.flag } : null,
-      };
-
-      // actualizar predicciones de cada usuario
-      for (const record of predictions) {
-        const prediction = record.predictions.find(p => p.matchId === matchId);
-        if (!prediction) continue;
-
-        let failed = false;
-        if (randomResult === 'draw') {
-          failed = true;
-        } else if (randomResult === 'fail') {
-          // "fail" = apostó por el otro equipo
-          failed = winner ? prediction.teamId !== winner._id.toString() : true;
-        } else if (randomResult === 'success') {
-          failed = false;
+        if (random < 0.4) {
+          results[m.matchId] = { winner: m.home };
+        } else if (random < 0.8) {
+          results[m.matchId] = { winner: m.visitor };
+        } else {
+          results[m.matchId] = { winner: null }; // empate
         }
-
-        prediction.result = failed ? 'fail' : 'success';
-        await record.save();
-
-        // actualizar gamble_survivor
-        if (failed) {
-          const gamble = await GambleSurvivor.findOne({
-            userId: record.userId,
-            survivorId,
-          });
-
-          if (gamble && !gamble.eliminated) {
-            gamble.lives = Math.max((gamble.lives || survivor.lives) - 1, 0);
-            if (gamble.lives < 1) gamble.eliminated = true;
-            await gamble.save();
-          }
-        }
-      }
-    }
-
-    res.status(200).json({
-      message: 'Simulation completed',
-      results: resultsByMatch,
+      });
     });
+
+    survivor.survivorResults = results;
+    survivor.finished = true;
+    await survivor.save();
+
+    // 🔹 actualizar vidas de cada usuario en GambleSurvivor
+    const predictions = await PredictionSurvivor.find({ survivorId });
+
+    for (const pred of predictions) {
+      const gamble = await GambleSurvivor.findOne({ userId: pred.userId, survivorId });
+      if (!gamble) continue;
+
+      let lives = gamble.lives;
+
+      pred.predictions.forEach((p) => {
+        const matchResult = results[p.matchId];
+
+        if (!matchResult || !matchResult.winner) {
+          // empate o sin resultado => resta vida
+          lives -= 1;
+          p.result = "fail";
+        } else if (p.teamId === matchResult.winner._id.toString()) {
+          // acertó
+          p.result = "success";
+        } else {
+          // perdió
+          lives -= 1;
+          p.result = "fail";
+        }
+      });
+
+      gamble.lives = lives;
+      if (lives <= 0) gamble.eliminated = true;
+
+      await gamble.save();
+      await pred.save();
+    }
+
+    res.json({ message: "Simulation complete", results });
   } catch (err) {
-    console.error('Simulation error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error("Simulate error:", err);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
-
-
-
-// Resolve match and update lives
+/* ===============================
+   POST /api/survivor/resolve-match
+   Resolver un partido manualmente (cuando termina en la vida real)
+   - actualiza resultados en predicciones
+   - descuenta vidas de los que fallaron
+   =============================== */
 router.post('/resolve-match', async (req: Request, res: Response) => {
   const { survivorId, matchId, winnerTeamId, isDraw } = req.body;
 
@@ -332,14 +431,12 @@ router.post('/resolve-match', async (req: Request, res: Response) => {
     const predictions = await PredictionSurvivor.find({ survivorId });
 
     for (const record of predictions) {
-      // Buscar predicción dentro del array
       const prediction = record.predictions.find(p => p.matchId === matchId);
       if (!prediction) continue;
 
       const pickedTeam = prediction.teamId;
       const failed = isDraw || pickedTeam !== winnerTeamId;
 
-      // Guardar resultado en PredictionSurvivor
       prediction.result = failed ? 'fail' : 'success';
       await record.save();
 
@@ -351,7 +448,7 @@ router.post('/resolve-match', async (req: Request, res: Response) => {
         if (gamble.lives < 1) gamble.eliminated = true;
         await gamble.save();
 
-        console.log(`[RESOLVE] user=${record.userId} survivor=${survivorId} match=${matchId} result=fail lives=${gamble.lives}`);
+        console.log(`[RESOLVE] user=${record.userId} survivor=${survivorId} match=${matchId} result=fail`);
       } else {
         console.log(`[RESOLVE] user=${record.userId} survivor=${survivorId} match=${matchId} result=success`);
       }

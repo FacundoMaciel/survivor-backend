@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 interface ITeam {
-  _id: any;
+  _id: mongoose.Types.ObjectId;
   name: string;
   flag: string;
 }
@@ -12,11 +12,18 @@ interface IMatch {
   visitor: ITeam;
 }
 
+interface IJornada {
+  jornada: number;
+  matches: IMatch[];
+}
+
 interface ISurvivor extends Document {
   name: string;
-  competition: IMatch[];
+  competition: IJornada[];
   startDate: Date;
   lives: number;
+  finished?: boolean;
+  survivorResults?: any;
 }
 
 const TeamSchema = new Schema({
@@ -30,11 +37,18 @@ const MatchSchema = new Schema({
   visitor: { type: TeamSchema, required: true }
 });
 
+const JornadaSchema = new Schema({
+  jornada: { type: Number, required: true },
+  matches: { type: [MatchSchema], required: true }
+});
+
 const SurvivorSchema: Schema = new mongoose.Schema({
   name: { type: String, required: true },
-  competition: [MatchSchema],
+  competition: [JornadaSchema],
   startDate: { type: Date, required: true },
-  lives: { type: Number, default: 3 }
+  lives: { type: Number, default: 3 },
+  finished: { type: Boolean, default: false },
+  survivorResults: { type: Schema.Types.Mixed, default: null }
 });
 
 export default mongoose.model<ISurvivor>('Survivor', SurvivorSchema);
