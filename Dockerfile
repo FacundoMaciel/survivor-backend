@@ -4,12 +4,12 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# Solo dependencias necesarias
-RUN npm ci --only=production
+# instalamos todo (incluye devDependencies para que exista tsc)
+RUN npm install
 
 COPY . .
 
-# Compilamos TS a JS
+# compilamos TS -> JS
 RUN npm run build
 
 EXPOSE 4300

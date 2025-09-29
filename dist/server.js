@@ -14,7 +14,7 @@ const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 const mongoUri = process.env.MONGO_URI || 'mongodb://localhost:27017/survivor';
-// Conexión Mongo
+// Conexión Mongo LEvantar backend:docker compose up
 mongoose_1.default.connect(mongoUri)
     .then(() => {
     console.log(`✅ Connected to MongoDB at ${mongoUri}`);
@@ -28,4 +28,5 @@ mongoose_1.default.connect(mongoUri)
 app.use('/api/survivor', survivorRoutes_1.default);
 const PORT = process.env.PORT || 4300;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+exports.default = app;
 //# sourceMappingURL=server.js.map

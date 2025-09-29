@@ -43,11 +43,17 @@ const MatchSchema = new mongoose_1.Schema({
     home: { type: TeamSchema, required: true },
     visitor: { type: TeamSchema, required: true }
 });
+const JornadaSchema = new mongoose_1.Schema({
+    jornada: { type: Number, required: true },
+    matches: { type: [MatchSchema], required: true }
+});
 const SurvivorSchema = new mongoose_1.default.Schema({
     name: { type: String, required: true },
-    competition: [MatchSchema],
+    competition: [JornadaSchema],
     startDate: { type: Date, required: true },
-    lives: { type: Number, default: 3 }
+    lives: { type: Number, default: 3 },
+    finished: { type: Boolean, default: false },
+    survivorResults: { type: mongoose_1.Schema.Types.Mixed, default: null }
 });
 exports.default = mongoose_1.default.model('Survivor', SurvivorSchema);
 //# sourceMappingURL=Survivor.js.map
